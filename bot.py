@@ -10,9 +10,19 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.state import StatesGroup, State
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from dotenv import load_dotenv
+import os
 
-# Настройка токена и логирования
-TOKEN = "..."
+# Загружаем переменные из .env
+load_dotenv()
+
+# Получаем токен
+TOKEN = os.getenv("TOKEN")
+
+if not TOKEN:
+    print("Токен не найден в .env!")
+else:
+    print("Токен загружен:", TOKEN)
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
