@@ -254,24 +254,30 @@ async def choose_items(message: Message, state: FSMContext):
         booked = booked_items.get(item_name, 0)
         available = total_available - booked
         
+        # Проверяем, не превышает ли запрошенное количество доступное
         if available > 0:
-            items[item_name] = items.get(item_name, 0) + 1
-            await state.update_data(items=items)
-            await message.answer(f"Добавлено: {item_name} ({items[item_name]} шт.)\nОсталось: {available - items[item_name]} шт.")
-            
-            # Обновляем клавиатуру с новыми данными
-            keyboard_buttons = []
-            for item, details in EQUIPMENT[category].items():
-                total_available = details[0]
-                booked = booked_items.get(item, 0)
-                available = total_available - booked - items.get(item, 0)  # Учитываем уже добавленное в заказ
-                keyboard_buttons.append([KeyboardButton(text=f"{item} ({available} шт.)")])
-            
-            keyboard_buttons.append([KeyboardButton(text="Назад"), KeyboardButton(text="Готово")])
-            keyboard = ReplyKeyboardMarkup(keyboard=keyboard_buttons, resize_keyboard=True)
-            await message.answer("Выберите оборудование:", reply_markup=keyboard)
+            # Проверяем, сколько уже добавлено в заказ
+            already_added = items.get(item_name, 0)
+            if already_added < available:
+                items[item_name] = already_added + 1
+                await state.update_data(items=items)
+                await message.answer(f"Добавлено: {item_name} ({items[item_name]} шт.)\nОсталось: {available - items[item_name]} шт.")
+            else:
+                await message.answer(f"Невозможно добавить больше {item_name}. Доступно только {available} шт.")
         else:
             await message.answer("Это оборудование уже занято на выбранную дату.")
+        
+        # Обновляем клавиатуру с новыми данными
+        keyboard_buttons = []
+        for item, details in EQUIPMENT[category].items():
+            total_available = details[0]
+            booked = booked_items.get(item, 0)
+            available = total_available - booked - items.get(item, 0)  # Учитываем уже добавленное в заказ
+            keyboard_buttons.append([KeyboardButton(text=f"{item} ({available} шт.)")])
+        
+        keyboard_buttons.append([KeyboardButton(text="Назад"), KeyboardButton(text="Готово")])
+        keyboard = ReplyKeyboardMarkup(keyboard=keyboard_buttons, resize_keyboard=True)
+        await message.answer("Выберите оборудование:", reply_markup=keyboard)
     elif message.text == "Готово":
         if not items:
             await message.answer("Вы не выбрали ни одного оборудования.")
