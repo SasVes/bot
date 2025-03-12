@@ -208,20 +208,39 @@ async def choose_category(message: Message, state: FSMContext):
 async def show_confirmation(message: Message, state: FSMContext):
     data = await state.get_data()
     items = data.get("items", {})
-    selected_items = "\n".join([f"{item} x{quantity}" for item, quantity in items.items()])
     
+    # Рассчитываем общую стоимость и формируем список выбранного оборудования с ценами
+    total_price = 0
+    user_friendly_details = []
+    for item, quantity in items.items():
+        for category, equipment in EQUIPMENT.items():
+            if item in equipment:
+                price_per_unit = equipment[item][1]  # Цена за единицу
+                total_item_price = price_per_unit * quantity  # Общая стоимость для позиции
+                total_price += total_item_price  # Добавляем к общей сумме
+                user_friendly_details.append(f"{item} x{quantity} ({total_item_price} руб.)")
+                break
+    
+    # Формируем сообщение с выбранным оборудованием и общей стоимостью
+    selected_items = "\n".join(user_friendly_details)
+    
+    # Создаем клавиатуру для выбора действия
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Подтвердить бронь")],
             [KeyboardButton(text="Добавить еще оборудование")],
             [KeyboardButton(text="Удалить оборудование")],
-            [KeyboardButton(text="Отменить смету")]  # Новая кнопка
+            [KeyboardButton(text="Отменить смету")]
         ],
         resize_keyboard=True
     )
     
     if items:
-        await message.answer(f"Текущий заказ:\n{selected_items}\nВыберите действие:", reply_markup=keyboard)
+        await message.answer(
+            f"Текущий заказ:\n{selected_items}\n\n*Итого: {total_price} руб.*\n\nВыберите действие:",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
     else:
         await message.answer("Вы не выбрали ни одного оборудования.", reply_markup=keyboard)
     
