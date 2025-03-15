@@ -511,8 +511,8 @@ async def process_booking_deletion(callback_query: CallbackQuery, state: FSMCont
     # Уведомление в чат об отмене бронирования
     notification_message = (
         "📢 *Бронирование отменено!*\n\n"
-        f"👤 *Пользователь:* @{callback_query.from_user.username}\n"
         f"📅 *Дата:* {selected_booking[1]}\n"
+        f"👤 *Пользователь:* @{callback_query.from_user.username}\n"
         f"📦 *Оборудование:* {selected_booking[2]}\n\n"
         "Оборудование снова доступно для бронирования! 🎉"
     )
@@ -560,8 +560,8 @@ async def confirm_booking(message: Message, state: FSMContext):
     # Уведомление в чат о новом бронировании
     notification_message = (
         "📢 *Новое бронирование!*\n\n"
-        f"👤 *Пользователь:* @{message.from_user.username}\n"
         f"📅 *Дата:* {date}\n"
+        f"👤 *Пользователь:* @{message.from_user.username}\n"
         f"📦 *Оборудование:*\n" + "\n".join(user_friendly_details) + "\n"
         f"💵 *Итого:* {total_price} руб.\n\n"
     )
