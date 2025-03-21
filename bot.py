@@ -510,7 +510,7 @@ async def process_booking_deletion(callback_query: CallbackQuery, state: FSMCont
 
     # Уведомление в чат об отмене бронирования
     notification_message = (
-        "📢 *Бронирование отменено!*\n\n"
+        "❌ *Бронирование отменено!*\n\n"
         f"📅 *Дата:* {selected_booking[1]}\n"
         f"👤 *Пользователь:* @{callback_query.from_user.username}\n"
         f"📦 *Оборудование:* {selected_booking[2]}\n\n"
