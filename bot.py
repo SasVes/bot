@@ -13,6 +13,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 import os
 
+@dp.message()
+async def debug_chat_id(message: types.Message):
+    print(f"Chat ID: {message.chat.id}")
+    await message.answer(f"ID этого чата: `{message.chat.id}`", parse_mode="Markdown"
+
 # Загружаем переменные из .env
 load_dotenv()
 
