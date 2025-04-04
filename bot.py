@@ -70,8 +70,8 @@ EQUIPMENT = {
     "Генератор, коммутация и тд.": {
         "Генератор 8кв": [1, 7500], "Генератор 2кв": [1, 3000], "Кабло 10м по 5шт": [2, 750], "Кабло 10м по 1шт": [5, 150], "Страховка 50см": [10, 30], "V-mount": [2, 360], "Дым машина": [1, 1000], "Фал 30м": [2, 200], "Фал 20м": [2, 150], "Бабкина сумка": [1, 1]
     },
-    "Связь": {
-        "Интеркомы 6шт": [1, 5000], "Интеркомы 4шт": [1, 3300], "Интеркомы 2шт": [1, 1650], "Рации": [2, 100]
+    "Связь": {  # Новая категория
+        "Интеркомы 6шт": [1, 5000], "Интеркомы 4шт": [1, 3300], "Интеркомы 2шт": [1, 1650], "Рации": [2, 100]  # Новое оборудование
     }
 }
 
@@ -81,16 +81,10 @@ class BookingState(StatesGroup):
     choosing_category = State()
     choosing_items = State()
     confirmation = State()
-    removing_items = State()
+    removing_items = State()  # Состояние для удаления оборудования
 
 class DeletingBookingState(StatesGroup):
-    choosing_booking_to_delete = State()
-
-class EditingBookingState(StatesGroup):
-    choosing_booking_to_edit = State()
-    choosing_edit_action = State()
-    editing_date = State()
-    editing_equipment = State()
+    choosing_booking_to_delete = State()  # Состояние для удаления бронирования
 
 # Обновляем главное меню
 main_menu_keyboard = ReplyKeyboardMarkup(
@@ -100,8 +94,7 @@ main_menu_keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="Мои бронирования")],
         [KeyboardButton(text="Все бронирования")],
         [KeyboardButton(text="Удалить бронь")],
-        [KeyboardButton(text="Редактировать бронь")],
-        [KeyboardButton(text="Архив бронирований")]
+        [KeyboardButton(text="Архив бронирований")]  # Новая кнопка
     ],
     resize_keyboard=True
 )
@@ -117,56 +110,18 @@ async def send_notification_to_chat(message: str):
 async def move_past_bookings_to_archive():
     current_date = datetime.date.today().strftime("%Y-%m-%d")
     
+    # Выбираем прошедшие бронирования
     cursor.execute("SELECT * FROM bookings WHERE date < ?", (current_date,))
     past_bookings = cursor.fetchall()
     
     if past_bookings:
+        # Переносим их в архив
         cursor.executemany("INSERT INTO archive_bookings VALUES (?, ?, ?, ?, ?, ?)", past_bookings)
         conn.commit()
         
+        # Удаляем из основной таблицы
         cursor.execute("DELETE FROM bookings WHERE date < ?", (current_date,))
         conn.commit()
-
-# Функция проверки доступности оборудования
-async def is_equipment_available(equipment_str: str, date: str, exclude_booking_id: int = None) -> bool:
-    equipment_lines = equipment_str.split("\n")
-    requested_items = {}
-    
-    for line in equipment_lines:
-        if " x" in line:
-            item, quantity = line.split(" x")
-            requested_items[item.strip()] = int(quantity)
-    
-    if exclude_booking_id:
-        cursor.execute("""
-            SELECT equipment FROM bookings 
-            WHERE date = ? AND rowid != ?
-        """, (date, exclude_booking_id))
-    else:
-        cursor.execute("SELECT equipment FROM bookings WHERE date = ?", (date,))
-    
-    booked_equipment = cursor.fetchall()
-    
-    for item, needed_quantity in requested_items.items():
-        total_available = 0
-        for category in EQUIPMENT.values():
-            if item in category:
-                total_available = category[item][0]
-                break
-        
-        if total_available == 0:
-            return False
-        
-        booked_count = 0
-        for booking in booked_equipment:
-            for line in booking[0].split("\n"):
-                if line.startswith(item + " x"):
-                    booked_count += int(line.split("x")[1])
-        
-        if booked_count + needed_quantity > total_available:
-            return False
-    
-    return True
 
 # Команда /start
 @dp.message(CommandStart())
@@ -184,15 +139,18 @@ async def start_booking(message: Message, state: FSMContext):
 async def process_simple_calendar(callback_query: CallbackQuery, callback_data: dict, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
-        selected_date = date.date()
+        # Преобразуем datetime.datetime в datetime.date
+        selected_date = date.date()  # Получаем только дату без времени
         if selected_date < datetime.date.today():
             await callback_query.message.answer("Ошибка! Нельзя выбрать прошедшую дату.")
             return
         await state.update_data(date=selected_date.strftime("%Y-%m-%d"))
         await callback_query.message.answer(f"Вы выбрали дату: {selected_date.strftime('%Y-%m-%d')}")
         
+        # Устанавливаем состояние выбора категории
         await state.set_state(BookingState.choosing_category)
         
+        # Создаем клавиатуру для выбора категории
         keyboard = ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text=cat)] for cat in EQUIPMENT.keys()] +
                      [[KeyboardButton(text="Изменить дату"), KeyboardButton(text="Отмена"), KeyboardButton(text="Готово")]],
@@ -206,9 +164,11 @@ async def choose_category(message: Message, state: FSMContext):
     if message.text in EQUIPMENT:
         await state.update_data(category=message.text)
         
+        # Получаем выбранную дату
         data = await state.get_data()
         date = data.get("date")
         
+        # Получаем список забронированного оборудования на эту дату
         cursor.execute("SELECT equipment FROM bookings WHERE date = ?", (date,))
         booked_equipment = cursor.fetchall()
         booked_items = {}
@@ -218,13 +178,15 @@ async def choose_category(message: Message, state: FSMContext):
                     name, quantity = item_line.split(" x")
                     booked_items[name] = booked_items.get(name, 0) + int(quantity)
         
+        # Формируем клавиатуру с учетом доступного количества
         keyboard_buttons = []
         for item, details in EQUIPMENT[message.text].items():
-            total_available = details[0]
-            booked = booked_items.get(item, 0)
-            available = total_available - booked
+            total_available = details[0]  # Общее количество оборудования
+            booked = booked_items.get(item, 0)  # Забронированное количество
+            available = total_available - booked  # Доступное количество
             keyboard_buttons.append([KeyboardButton(text=f"{item} ({available} шт.)")])
         
+        # Добавляем кнопки "Назад", "Готово" и "Изменить дату"
         keyboard_buttons.append([KeyboardButton(text="Назад"), KeyboardButton(text="Готово")])
         keyboard_buttons.append([KeyboardButton(text="Изменить дату")])
         
@@ -247,19 +209,22 @@ async def show_confirmation(message: Message, state: FSMContext):
     data = await state.get_data()
     items = data.get("items", {})
     
+    # Рассчитываем общую стоимость и формируем список выбранного оборудования с ценами
     total_price = 0
     user_friendly_details = []
     for item, quantity in items.items():
         for category, equipment in EQUIPMENT.items():
             if item in equipment:
-                price_per_unit = equipment[item][1]
-                total_item_price = price_per_unit * quantity
-                total_price += total_item_price
+                price_per_unit = equipment[item][1]  # Цена за единицу
+                total_item_price = price_per_unit * quantity  # Общая стоимость для позиции
+                total_price += total_item_price  # Добавляем к общей сумме
                 user_friendly_details.append(f"{item} x{quantity} ({total_item_price} руб.)")
                 break
     
+    # Формируем сообщение с выбранным оборудованием и общей стоимостью
     selected_items = "\n".join(user_friendly_details)
     
+    # Создаем клавиатуру для выбора действия
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Подтвердить бронь")],
@@ -288,10 +253,12 @@ async def choose_items(message: Message, state: FSMContext):
     category = data["category"]
     items = data.get("items", {})
     
+    # Убираем " (X шт.)" для проверки
     if message.text.split(" (")[0] in EQUIPMENT[category]:
-        item_name = message.text.split(" (")[0]
+        item_name = message.text.split(" (")[0]  # Получаем название оборудования без количества
         date = data["date"]
         
+        # Получаем список забронированного оборудования на эту дату
         cursor.execute("SELECT equipment FROM bookings WHERE date = ?", (date,))
         booked_equipment = cursor.fetchall()
         booked_items = {}
@@ -301,11 +268,14 @@ async def choose_items(message: Message, state: FSMContext):
                     name, quantity = item_line.split(" x")
                     booked_items[name] = booked_items.get(name, 0) + int(quantity)
         
+        # Проверяем доступное количество
         total_available = EQUIPMENT[category][item_name][0]
         booked = booked_items.get(item_name, 0)
         available = total_available - booked
         
+        # Проверяем, не превышает ли запрошенное количество доступное
         if available > 0:
+            # Проверяем, сколько уже добавлено в заказ
             already_added = items.get(item_name, 0)
             if already_added < available:
                 items[item_name] = already_added + 1
@@ -316,11 +286,12 @@ async def choose_items(message: Message, state: FSMContext):
         else:
             await message.answer("Это оборудование уже занято на выбранную дату.")
         
+        # Обновляем клавиатуру с новыми данными
         keyboard_buttons = []
         for item, details in EQUIPMENT[category].items():
             total_available = details[0]
             booked = booked_items.get(item, 0)
-            available = total_available - booked - items.get(item, 0)
+            available = total_available - booked - items.get(item, 0)  # Учитываем уже добавленное в заказ
             keyboard_buttons.append([KeyboardButton(text=f"{item} ({available} шт.)")])
         
         keyboard_buttons.append([KeyboardButton(text="Назад"), KeyboardButton(text="Готово")])
@@ -369,7 +340,7 @@ async def handle_confirmation(message: Message, state: FSMContext):
             keyboard = ReplyKeyboardMarkup(keyboard=keyboard_buttons, resize_keyboard=True)
             await message.answer("Выберите оборудование для удаления:", reply_markup=keyboard)
             await state.set_state(BookingState.removing_items)
-    elif message.text == "Отменить смету":
+    elif message.text == "Отменить смету":  # Обработка новой кнопки
         await state.clear()
         await message.answer("Смета отменена. Вы вернулись в главное меню.", reply_markup=main_menu_keyboard)
     else:
@@ -381,8 +352,8 @@ async def remove_items(message: Message, state: FSMContext):
     data = await state.get_data()
     items = data.get("items", {})
     
-    if message.text.split(" (")[0] in items:
-        item_name = message.text.split(" (")[0]
+    if message.text.split(" (")[0] in items:  # Убираем " (X шт.)" для проверки
+        item_name = message.text.split(" (")[0]  # Получаем название оборудования без количества
         
         if items[item_name] > 1:
             items[item_name] -= 1
@@ -393,6 +364,7 @@ async def remove_items(message: Message, state: FSMContext):
             await state.update_data(items=items)
             await message.answer(f"Оборудование {item_name} полностью удалено")
         
+        # Обновляем клавиатуру с новыми данными
         keyboard_buttons = []
         for item, quantity in items.items():
             keyboard_buttons.append([KeyboardButton(text=f"{item} ({quantity} шт.)")])
@@ -418,8 +390,10 @@ async def show_booked_dates(message: Message):
 # Обработка нажатия на кнопку "Мои бронирования"
 @dp.message(lambda message: message.text == "Мои бронирования")
 async def user_report(message: Message):
+    # Переносим прошедшие бронирования в архив
     await move_past_bookings_to_archive()
     
+    # Получаем актуальные бронирования
     cursor.execute("SELECT username, date, price FROM bookings WHERE user_id = ?", (message.from_user.id,))
     bookings = cursor.fetchall()
     
@@ -440,6 +414,7 @@ async def user_report(message: Message):
 # Обработка нажатия на кнопку "Все бронирования"
 @dp.message(lambda message: message.text == "Все бронирования")
 async def full_report(message: Message):
+    # Переносим прошедшие бронирования в архив
     await move_past_bookings_to_archive()
     
     cursor.execute("SELECT username, date, price FROM bookings")
@@ -461,6 +436,7 @@ async def full_report(message: Message):
 # Обработка нажатия на кнопку "Архив бронирований"
 @dp.message(lambda message: message.text == "Архив бронирований")
 async def show_archive(message: Message):
+    # Получаем архивные бронирования пользователя
     cursor.execute("SELECT username, date, price FROM archive_bookings WHERE user_id = ?", (message.from_user.id,))
     archive_bookings = cursor.fetchall()
     
@@ -481,8 +457,10 @@ async def show_archive(message: Message):
 # Обработка нажатия на кнопку "Удалить бронь"
 @dp.message(lambda message: message.text == "Удалить бронь")
 async def start_deleting_booking(message: Message, state: FSMContext):
+    # Переносим прошедшие бронирования в архив
     await move_past_bookings_to_archive()
     
+    # Получаем все актуальные бронирования пользователя
     cursor.execute("SELECT rowid, date, equipment FROM bookings WHERE user_id = ?", (message.from_user.id,))
     bookings = cursor.fetchall()
     
@@ -490,24 +468,32 @@ async def start_deleting_booking(message: Message, state: FSMContext):
         await message.answer("У вас нет активных бронирований.")
         return
     
+    # Создаем клавиатуру с кнопками
     builder = InlineKeyboardBuilder()
     for booking in bookings:
         rowid, date, equipment = booking
+        # Берем первые несколько позиций оборудования для отображения
         equipment_list = equipment.split("\n")
-        short_equipment = ", ".join(equipment_list[:3])
+        short_equipment = ", ".join(equipment_list[:3])  # Показываем первые 3 позиции
         if len(equipment_list) > 3:
-            short_equipment += "..."
-        builder.button(text=f"{date} - {short_equipment}", callback_data=f"delete_booking:{rowid}")
-    builder.adjust(1)
+            short_equipment += "..."  # Добавляем многоточие, если позиций больше 3
+        # Формируем текст кнопки
+        button_text = f"{date} - {short_equipment}"
+        # Добавляем кнопку с callback_data, содержащим ID бронирования
+        builder.button(text=button_text, callback_data=f"delete_booking:{rowid}")
+    builder.adjust(1)  # Располагаем кнопки по одной в строке
     
+    # Отправляем сообщение с клавиатурой
     await message.answer("Выберите бронирование для удаления:", reply_markup=builder.as_markup())
     await state.set_state(DeletingBookingState.choosing_booking_to_delete)
 
 # Обработка выбора бронирования для удаления
 @dp.callback_query(DeletingBookingState.choosing_booking_to_delete, lambda c: c.data.startswith("delete_booking:"))
 async def process_booking_deletion(callback_query: CallbackQuery, state: FSMContext):
+    # Извлекаем ID бронирования из callback_data
     selected_id = int(callback_query.data.split(":")[1])
     
+    # Проверяем, что бронирование принадлежит текущему пользователю
     cursor.execute("SELECT rowid, date, equipment FROM bookings WHERE rowid = ? AND user_id = ?", (selected_id, callback_query.from_user.id))
     selected_booking = cursor.fetchone()
     
@@ -515,12 +501,14 @@ async def process_booking_deletion(callback_query: CallbackQuery, state: FSMCont
         await callback_query.message.answer("Бронирование с таким ID не найдено или оно принадлежит другому пользователю.")
         return
     
+    # Удаляем бронирование из базы данных
     cursor.execute("DELETE FROM bookings WHERE rowid = ?", (selected_id,))
     conn.commit()
     
     await callback_query.message.answer(f"Бронирование на {selected_booking[1]} успешно удалено!", reply_markup=main_menu_keyboard)
     await state.clear()
 
+    # Уведомление в чат об отмене бронирования
     notification_message = (
         "❌ *Бронирование отменено!*\n\n"
         f"📅 *Дата:* {selected_booking[1]}\n"
@@ -530,114 +518,13 @@ async def process_booking_deletion(callback_query: CallbackQuery, state: FSMCont
     )
     await send_notification_to_chat(notification_message)
 
-# Обработка нажатия на кнопку "Редактировать бронь"
-@dp.message(lambda message: message.text == "Редактировать бронь")
-async def start_editing_booking(message: Message, state: FSMContext):
-    await move_past_bookings_to_archive()
-    
-    cursor.execute("SELECT rowid, date, equipment FROM bookings WHERE user_id = ?", (message.from_user.id,))
-    bookings = cursor.fetchall()
-    
-    if not bookings:
-        await message.answer("У вас нет активных бронирований для редактирования.")
-        return
-    
-    builder = InlineKeyboardBuilder()
-    for booking in bookings:
-        rowid, date, equipment = booking
-        short_equipment = ", ".join(equipment.split("\n")[:3])
-        builder.button(text=f"{date} - {short_equipment}", callback_data=f"edit_booking:{rowid}")
-    builder.adjust(1)
-    
-    await message.answer("Выберите бронирование для редактирования:", reply_markup=builder.as_markup())
-    await state.set_state(EditingBookingState.choosing_booking_to_edit)
-
-# Обработка выбора брони для редактирования
-@dp.callback_query(EditingBookingState.choosing_booking_to_edit, lambda c: c.data.startswith("edit_booking:"))
-async def select_booking_to_edit(callback_query: CallbackQuery, state: FSMContext):
-    booking_id = int(callback_query.data.split(":")[1])
-    await state.update_data(booking_id=booking_id)
-    
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Изменить дату", callback_data="edit_date")
-    builder.button(text="📦 Изменить оборудование", callback_data="edit_equipment")
-    builder.button(text="❌ Отменить редактирование", callback_data="cancel_edit")
-    builder.adjust(1)
-    
-    await callback_query.message.answer(
-        "Что вы хотите изменить?",
-        reply_markup=builder.as_markup()
-    )
-    await state.set_state(EditingBookingState.choosing_edit_action)
-
-# Обработка изменения даты
-@dp.callback_query(EditingBookingState.choosing_edit_action, lambda c: c.data == "edit_date")
-async def edit_booking_date(callback_query: CallbackQuery, state: FSMContext):
-    await callback_query.message.answer(
-        "Выберите новую дату бронирования:",
-        reply_markup=await SimpleCalendar().start_calendar()
-    )
-    await state.set_state(EditingBookingState.editing_date)
-
-@dp.callback_query(EditingBookingState.editing_date, SimpleCalendarCallback.filter())
-async def process_date_edit(callback_query: CallbackQuery, callback_data: dict, state: FSMContext):
-    selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
-    if selected:
-        new_date = date.date().strftime("%Y-%m-%d")
-        data = await state.get_data()
-        
-        cursor.execute("SELECT equipment FROM bookings WHERE rowid = ?", (data['booking_id'],))
-        equipment = cursor.fetchone()[0]
-        
-        if not await is_equipment_available(equipment, new_date, exclude_booking_id=data['booking_id']):
-            await callback_query.message.answer(
-                "Оборудование уже занято на выбранную дату. Пожалуйста, выберите другую дату."
-            )
-            return
-        
-        cursor.execute("UPDATE bookings SET date = ? WHERE rowid = ?", (new_date, data['booking_id']))
-        conn.commit()
-        
-        await callback_query.message.answer(
-            f"Дата бронирования успешно изменена на {new_date}!"
-        )
-        await state.clear()
-
-# Обработка изменения оборудования
-@dp.callback_query(EditingBookingState.choosing_edit_action, lambda c: c.data == "edit_equipment")
-async def edit_booking_equipment(callback_query: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    cursor.execute("SELECT date FROM bookings WHERE rowid = ?", (data['booking_id'],))
-    booking_date = cursor.fetchone()[0]
-    
-    await state.update_data(current_date=booking_date)
-    await state.set_state(BookingState.choosing_category)
-    await callback_query.message.answer(
-        "Теперь вы можете добавить новое оборудование. "
-        "Старое оборудование будет заменено.\n"
-        "Выберите категорию:",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=cat)] for cat in EQUIPMENT.keys()] +
-                     [[KeyboardButton(text="Отмена редактирования")]],
-            resize_keyboard=True
-        )
-    )
-
-# Обработка отмены редактирования
-@dp.callback_query(EditingBookingState.choosing_edit_action, lambda c: c.data == "cancel_edit")
-async def cancel_editing(callback_query: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback_query.message.answer(
-        "Редактирование отменено.",
-        reply_markup=main_menu_keyboard
-    )
-
 # Подтверждение бронирования
 async def confirm_booking(message: Message, state: FSMContext):
     data = await state.get_data()
     date = data["date"]
     items = data.get("items", {})
     
+    # Рассчитываем общую стоимость и формируем данные для сохранения
     total_price = 0
     booking_details = []
     for item, quantity in items.items():
@@ -645,20 +532,18 @@ async def confirm_booking(message: Message, state: FSMContext):
             if item in equipment:
                 price = equipment[item][1] * quantity
                 total_price += price
+                # Сохраняем оборудование в формате "название xколичество"
                 booking_details.append(f"{item} x{quantity}")
                 break
     
-    if 'booking_id' in data:
-        booking_id = data['booking_id']
-        cursor.execute("DELETE FROM bookings WHERE rowid = ?", (booking_id,))
-        conn.commit()
-    
+    # Сохраняем бронирование в базу данных
     cursor.execute(
         "INSERT INTO bookings (user_id, username, date, equipment, quantity, price) VALUES (?, ?, ?, ?, ?, ?)",
         (message.from_user.id, message.from_user.username, date, "\n".join(booking_details), sum(items.values()), total_price)
     )
     conn.commit()
     
+    # Формируем сообщение с ценами для пользователя
     user_friendly_details = []
     for item, quantity in items.items():
         for category, equipment in EQUIPMENT.items():
@@ -667,10 +552,12 @@ async def confirm_booking(message: Message, state: FSMContext):
                 user_friendly_details.append(f"{item} x{quantity} ({price} руб.)")
                 break
     
+    # Отправляем сообщение пользователю
     await message.answer(f"Вы забронировали:\n" + "\n".join(user_friendly_details) + f"\nИтого: {total_price} руб.")
     await message.answer("Бронирование завершено, спасибо!", reply_markup=main_menu_keyboard)
     await state.clear()
 
+    # Уведомление в чат о новом бронировании
     notification_message = (
         "📢 *Новое бронирование!*\n\n"
         f"📅 *Дата:* {date}\n"
