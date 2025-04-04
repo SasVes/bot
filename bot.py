@@ -29,7 +29,7 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 # ID чата для уведомлений (замените на ваш)
-NOTIFICATION_CHAT_ID = "-4776932237"
+NOTIFICATION_CHAT_ID = "-1002534379051"
 
 # Подключение к базе данных
 conn = sqlite3.connect("bookings.db", check_same_thread=False)
