@@ -131,26 +131,47 @@ async def start(message: Message, state: FSMContext):
 # Обработка нажатия на кнопку "Забронировать оборудование"
 @dp.message(lambda message: message.text == "Забронировать оборудование")
 async def start_booking(message: Message, state: FSMContext):
+    today = datetime.date.today()
+    calendar = SimpleCalendar(show_alerts=True)
+    calendar.set_dates_range(today, today.replace(year=today.year + 1))  # Диапазон на год вперед
+    
     await state.set_state(BookingState.choosing_date)
-    await message.answer("Выберите дату бронирования:", reply_markup=await SimpleCalendar().start_calendar())
+    await message.answer(
+        "Выберите дату бронирования:",
+        reply_markup=await calendar.start_calendar(year=today.year, month=today.month)
+    )
 
 # Обработка выбора даты из календаря
 @dp.callback_query(SimpleCalendarCallback.filter())
 async def process_simple_calendar(callback_query: CallbackQuery, callback_data: dict, state: FSMContext):
+    today = datetime.date.today()
+    
+    # Если пользователь пытается выбрать прошедший месяц, перенаправляем на текущий
+    if 'year' in callback_data and 'month' in callback_data:
+        selected_year = int(callback_data['year'])
+        selected_month = int(callback_data['month'])
+        
+        if selected_year < today.year or (selected_year == today.year and selected_month < today.month):
+            calendar = SimpleCalendar(show_alerts=True)
+            calendar.set_dates_range(today, today.replace(year=today.year + 1))
+            await callback_query.message.edit_reply_markup(
+                reply_markup=await calendar.start_calendar(year=today.year, month=today.month)
+            )
+            return
+    
+    # Обработка выбора даты
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
-        # Преобразуем datetime.datetime в datetime.date
-        selected_date = date.date()  # Получаем только дату без времени
-        if selected_date < datetime.date.today():
+        selected_date = date.date()
+        if selected_date < today:
             await callback_query.message.answer("Ошибка! Нельзя выбрать прошедшую дату.")
             return
+        
         await state.update_data(date=selected_date.strftime("%Y-%m-%d"))
         await callback_query.message.answer(f"Вы выбрали дату: {selected_date.strftime('%Y-%m-%d')}")
         
-        # Устанавливаем состояние выбора категории
+        # Дальнейшая логика обработки выбора даты
         await state.set_state(BookingState.choosing_category)
-        
-        # Создаем клавиатуру для выбора категории
         keyboard = ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text=cat)] for cat in EQUIPMENT.keys()] +
                      [[KeyboardButton(text="Изменить дату"), KeyboardButton(text="Отмена"), KeyboardButton(text="Готово")]],
@@ -194,8 +215,15 @@ async def choose_category(message: Message, state: FSMContext):
         await message.answer("Выберите оборудование:", reply_markup=keyboard)
         await state.set_state(BookingState.choosing_items)
     elif message.text == "Изменить дату":
+        today = datetime.date.today()
+        calendar = SimpleCalendar(show_alerts=True)
+        calendar.set_dates_range(today, today.replace(year=today.year + 1))
+        
         await state.set_state(BookingState.choosing_date)
-        await message.answer("Выберите дату бронирования:", reply_markup=await SimpleCalendar().start_calendar())
+        await message.answer(
+            "Выберите дату бронирования:",
+            reply_markup=await calendar.start_calendar(year=today.year, month=today.month)
+        )
     elif message.text == "Отмена":
         await state.clear()
         await message.answer("Бронирование отменено.", reply_markup=main_menu_keyboard)
